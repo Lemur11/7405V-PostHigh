@@ -77,7 +77,7 @@ void opcontrol(void);
 //#include <iostream>
 #endif
 
-enum state_enum {
+enum wall_state_enum {
     NORMAL,
     CATCH,
     STOPPED,
@@ -86,5 +86,13 @@ enum state_enum {
     MOVED,
     USED
 };
+
+enum sort_state_enum {
+    OFF,
+    RED,
+    BLUE,
+    SORTING
+};
+
 
 #endif  // _PROS_MAIN_H_

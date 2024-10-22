@@ -12,5 +12,6 @@ extern pros::Motor hooks;
 
 extern pros::Rotation wall_rot;
 extern pros::Distance hook_dist;
+extern pros::Optical ring_col;
 
 extern pros::adi::Pneumatics mogo;

@@ -1,5 +1,8 @@
 #include "main.h"
 #include "devices.h"
+#include "auto_funcs.h"
+#include <atomic>
+#include "pid.h"
 
 // String print_state(&state_enum s) {
 // 	switch (s) {
@@ -12,6 +15,30 @@
 // 	}
 // }
 
+// state vars
+std::atomic<wall_state_enum> wall_state(NORMAL);
+std::atomic<sort_state_enum> sort_state(OFF);
+
+void color_sort() {
+	int delay = 100;
+	if (hook_dist.get() < 30 && wall_state == NORMAL) {
+		double reading = ring_col.get_hue();
+		switch (sort_state) {
+			case RED:
+			{
+				if (300 < reading < 360 || reading < 120) {
+					sort_state = SORTING;
+					pros::delay(delay);
+					hooks.move_velocity(0);
+					pros::delay(100);
+					sort_state = RED;
+				}
+			}
+		}
+	}
+}
+
+
 
 /**
  * Runs initialization code. This occurs as soon as the program is started.
@@ -21,6 +48,9 @@
  */
 void initialize() {
 	pros::lcd::initialize();
+	wall_rot.reset_position();
+	wall_rot.set_data_rate(5);
+	pros::delay(500);
 }
 /**
  * Runs while the robot is in the disabled state of Field Management System or
@@ -68,9 +98,6 @@ void autonomous() {}
  * task, not resume it from where it left off.
  */
 void opcontrol() {
-	// state var
-	state_enum state = NORMAL;
-
 	// constants
 	float target;
 	float error;
@@ -78,15 +105,23 @@ void opcontrol() {
 	float kp = 4;
 	float kd = 2;
 	float delta;
-	float intake_vel = 600;
+	float intake_vel = 300;
+	float deadzone = 500;
 	int cap = 28000;
+
+	// pid
+	PID wall_pid = PID(0.1, 0, 0.1);
+
+	// color sort
+	// pros::Task sorting(color_sort);
 
 	// coast brake mode
 	left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 	right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
-	// reset rotation
-	wall_rot.reset();
+	//init time
+	int prev_time = pros::millis();
+	int cur_time;
 
 	while (true) {
 		// Arcade control scheme
@@ -97,39 +132,44 @@ void opcontrol() {
 
 		// button logic
 		// use toggle (on rising edge)
-		if (controller.get_digital_new_press(DIGITAL_R1)) {
-			mogo.toggle();
+		if (controller.get_digital_new_press(DIGITAL_L1)) {
+			mogo.extend();
+		} else if (controller.get_digital_new_press(DIGITAL_L2)) {
+			mogo.retract();
 		}
-		if (controller.get_digital(DIGITAL_L1)) {
-			roller.move_velocity(intake_vel);
-			hooks.move_velocity(intake_vel);
-		} 
-		else if (controller.get_digital(DIGITAL_L2)) {
-			roller.move_velocity(-intake_vel);		
-			hooks.move_velocity(-intake_vel);
-		}
-		else {
-			roller.move_velocity(0);
-			hooks.move_velocity(0);
-		}
-		if (controller.get_digital_new_press(DIGITAL_A)) {
-			if (state == NORMAL) {
-				state = CATCH;
-			}
-			else if (state == ARMED) {
-				state = TOGGLED;
+		if (!(sort_state == SORTING)) {
+			if (controller.get_digital(DIGITAL_R1)) {
+				roller.move_velocity(intake_vel);
+				hooks.move_velocity(intake_vel);
+			} 
+			else if (controller.get_digital(DIGITAL_R2)) {
+				roller.move_velocity(-intake_vel);		
+				hooks.move_velocity(-intake_vel);
 			}
 			else {
-				state = USED;
+				roller.move_velocity(0);
+				hooks.move_velocity(0);
+			}
+		}
+		if (controller.get_digital_new_press(DIGITAL_RIGHT)) {
+			wall_pid.reset();
+			if (wall_state == NORMAL) {
+				wall_state = CATCH;
+			}
+			else if (wall_state == ARMED) {
+				wall_state = TOGGLED;
+			}
+			else {
+				wall_state = USED;
 			}
 		}
 
 		// fish mech finite state machine 
-		switch(state) {
+		switch(wall_state) {
 			case NORMAL:
 			{
 				pros::lcd::print(6, "NORMAL");
-				wall.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+				// wall.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 				break;
 			}
 			case CATCH:
@@ -139,32 +179,27 @@ void opcontrol() {
 				pros::lcd::print(6, "CATCH");
 				if (hook_dist.get() < 30) {
 					hooks.move_velocity(0);
-					state = STOPPED;
+					prev_error = 77;
+					wall_state = STOPPED;
 				}
 				break;
 			}
 			case STOPPED:
 			{
 				pros::lcd::print(6, "STOPPED");
-				target = 77.0;
-				prev_error = target;
-				error = target;
-				int reading = wall_rot.get_angle();
-				printf("%d\n", reading);
-				if (reading > cap) {
-					reading = reading - 36000;
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(7700, reading, (float)(cur_time - prev_time), 10000, true);
+				wall.move_velocity(power);
+				if (fabs(7700 - reading) < deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = ARMED;
 				}
-				error = target - ((float)reading / 100.0);
-				if (abs(error) < 5) {
-					wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-					wall.move_velocity(0);
-					state = ARMED;
-					break;
-				}
-				delta = error - prev_error;
-				printf("Target: %f, Pos: %d, Error: %f, Delta: %f, Vel: %f\n", target, reading, error, delta, kp*error - kd*delta);
-				prev_error = error;
-				wall.move_velocity(kp*error - kd*delta);
+				prev_time = cur_time;
 				break;
 			}
 			case ARMED:
@@ -175,61 +210,43 @@ void opcontrol() {
 			case TOGGLED:
 			{
 				pros::lcd::print(6, "TOGGLED");
-				state = MOVED;
-				break;
-			}
-			case MOVED:
-			{
-				pros::lcd::print(6, "MOVED");
 				hooks.move_velocity(50);
-				if (target != 200) {
-					target = 200;
-					prev_error = target;
-					error = target;
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time), 10000, true);
+				wall.move_velocity(power);
+				if (fabs(20000 - reading) < deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = USED;
 				}
-				int reading = wall_rot.get_angle();
-				if (reading > cap) {
-					reading = reading - 36000;
-				}
-				error = target - ((float)reading / 100.0);
-				if (abs(error) < 5) {
-					wall.move_velocity(0);
-					state = USED;
-					break;
-				}
-				delta = error - prev_error;
-				printf("Target: %f, Pos: %d, Error: %f, Delta: %f, Vel: %f\n", target, reading, error, delta, kp*error - kd*delta);
-				prev_error = error;
-				wall.move_velocity(kp*error - kd*delta);
+				prev_time = cur_time;
 				break;
 			}
 			case USED:
 			{
 				pros::lcd::print(6, "USED");
-				if (target != 0) {
-					target = 0;
-					prev_error = target;
-					error = target;
-				}
-				int reading = wall_rot.get_angle();
-				if (reading > cap) {
-					reading = reading - 36000;
-				}
-				error = target - ((float)reading / 100.0);
-				if (abs(error) < 4) {
-					wall.move_velocity(0);
-					state = NORMAL;
-					break;
-				}
-				delta = error - prev_error;
-				printf("Target: %f, Pos: %d, Error: %f, Delta: %f, Vel: %f\n", target, reading, error, delta, kp*error - kd*delta);
-				prev_error = error;
-				wall.move_velocity(kp*error - kd*delta);
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time), 10000, true);
+				wall.move_velocity(power);
+				if (fabs(0 - reading) < deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = USED;
+				}				
+				prev_time = cur_time;
 				break;
 			}
 		}
 
-		pros::lcd::print(0, "%d", state);
+		pros::lcd::print(0, "%d", wall_state.load());
 		pros::lcd::print(1, "%d", hook_dist.get());
 		pros::lcd::print(2, "Error: %f", error);
 		pros::lcd::print(3, "Prev: %f", prev_error);
