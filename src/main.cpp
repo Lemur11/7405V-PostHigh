@@ -86,7 +86,7 @@ void opcontrol() {
 	right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
 	// reset rotation
-	wall_rot.reset_position();
+	wall_rot.reset();
 
 	while (true) {
 		// Arcade control scheme
