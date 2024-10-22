@@ -20,21 +20,42 @@ std::atomic<wall_state_enum> wall_state(NORMAL);
 std::atomic<sort_state_enum> sort_state(OFF);
 
 void color_sort() {
-	int delay = 100;
-	if (hook_dist.get() < 30 && wall_state == NORMAL) {
-		double reading = ring_col.get_hue();
-		switch (sort_state) {
-			case RED:
-			{
-				if (300 < reading < 360 || reading < 120) {
-					sort_state = SORTING;
-					pros::delay(delay);
-					hooks.move_velocity(0);
-					pros::delay(100);
-					sort_state = RED;
+	int delay = 50;
+	while (true) {
+		// printf("%d\n", hook_dist.get());
+		if (hook_dist.get() < 40 && wall_state == NORMAL) {
+			double reading = ring_col.get_hue();
+			printf("PASSED\n");
+			switch (sort_state) {
+				case RED:
+				{
+					if (reading < 70) {
+						printf("THROWING ring %f\n", reading);
+						sort_state = SORTING;
+						hooks.move_velocity(600);
+						pros::delay(delay);
+						hooks.move_velocity(-600);
+						pros::delay(100);
+						sort_state = RED;
+					}
+					break;
 				}
+				case BLUE:
+					if (reading > 70) {
+						printf("THROWING");
+						sort_state = SORTING;
+						hooks.move_velocity(600);
+						pros::delay(delay);
+						hooks.move_velocity(-600);
+						pros::delay(100);
+						sort_state = BLUE;
+					}
+					break;
+
 			}
 		}
+
+		pros::delay(20);
 	}
 }
 
@@ -107,13 +128,14 @@ void opcontrol() {
 	float delta;
 	float intake_vel = 300;
 	float deadzone = 500;
+	float turn_sensitivity = 0.9;
 	int cap = 28000;
 
 	// pid
-	PID wall_pid = PID(0.1, 0, 0.1);
+	PID wall_pid = PID(0.015, 0, 0.0001);
 
 	// color sort
-	// pros::Task sorting(color_sort);
+	pros::Task sorting(color_sort);
 
 	// coast brake mode
 	left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
@@ -127,15 +149,15 @@ void opcontrol() {
 		// Arcade control scheme
 		int dir = controller.get_analog(ANALOG_LEFT_Y);    // Gets amount forward/backward from left joystick
 		int turn = controller.get_analog(ANALOG_RIGHT_X);  // Gets the turn left/right from right joystick
-		left_motors.move(dir + turn);                      // Sets left motor voltage
-		right_motors.move(dir - turn);                     // Sets right motor voltage
+		left_motors.move(dir + turn_sensitivity*(float)turn);                      // Sets left motor voltage
+		right_motors.move(dir - turn_sensitivity*(float)turn);                     // Sets right motor voltage
 
 		// button logic
 		// use toggle (on rising edge)
 		if (controller.get_digital_new_press(DIGITAL_L1)) {
-			mogo.extend();
-		} else if (controller.get_digital_new_press(DIGITAL_L2)) {
 			mogo.retract();
+		} else if (controller.get_digital_new_press(DIGITAL_L2)) {
+			mogo.extend();
 		}
 		if (!(sort_state == SORTING)) {
 			if (controller.get_digital(DIGITAL_R1)) {
@@ -146,7 +168,13 @@ void opcontrol() {
 				roller.move_velocity(-intake_vel);		
 				hooks.move_velocity(-intake_vel);
 			}
+			else if (controller.get_digital(DIGITAL_Y)) {
+				hooks.move_velocity(300);
+				roller.move_velocity(600);
+				sort_state = RED;
+			}
 			else {
+				sort_state = OFF;
 				roller.move_velocity(0);
 				hooks.move_velocity(0);
 			}
@@ -164,6 +192,7 @@ void opcontrol() {
 			}
 		}
 
+
 		// fish mech finite state machine 
 		switch(wall_state) {
 			case NORMAL:
@@ -177,7 +206,7 @@ void opcontrol() {
 				hooks.move_velocity(100);
 				roller.move_velocity(600);
 				pros::lcd::print(6, "CATCH");
-				if (hook_dist.get() < 30) {
+				if (hook_dist.get() < 40) {
 					hooks.move_velocity(0);
 					prev_error = 77;
 					wall_state = STOPPED;
@@ -192,7 +221,7 @@ void opcontrol() {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
-				float power = wall_pid.cycle(7700, reading, (float)(cur_time - prev_time), 10000, true);
+				float power = wall_pid.cycle(7700, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
 				if (fabs(7700 - reading) < deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
@@ -216,7 +245,7 @@ void opcontrol() {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
-				float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time), 10000, true);
+				float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
 				if (fabs(20000 - reading) < deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
@@ -234,17 +263,19 @@ void opcontrol() {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
-				float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time), 10000, true);
+				float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
 				if (fabs(0 - reading) < deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
         			wall.move_velocity(0);
-					wall_state = USED;
+					wall_state = NORMAL;
 				}				
 				prev_time = cur_time;
 				break;
 			}
 		}
+
+		// printf("%f\n", ring_col.get_hue());
 
 		pros::lcd::print(0, "%d", wall_state.load());
 		pros::lcd::print(1, "%d", hook_dist.get());

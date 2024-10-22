@@ -36,9 +36,9 @@ float PID::cycle(float reference, float reading, float delta_time, float max_sle
         printf("Error: %f ", error);
         printf("Delta: %f ", delta);
         // printf("Sum: %f\n", sum);
-        printf("Time: %f ", time);
-        printf("Prev Out: %f\n", prev_output);
-        // printf("Out: %f" out);
+        printf("Time: %f ", delta_time);
+        printf("Prev Out: %f ", prev_output);
+        printf("Out: %f\n", out);
     }
     prev_output = out;
     return out;

@@ -14,4 +14,4 @@ pros::Rotation wall_rot = pros::Rotation(11);
 pros::Distance hook_dist = pros::Distance(18);
 pros::Optical ring_col = pros::Optical(20);
 
-pros::adi::Pneumatics mogo = pros::adi::Pneumatics(1, false);
+pros::adi::Pneumatics mogo = pros::adi::Pneumatics('e', false);
