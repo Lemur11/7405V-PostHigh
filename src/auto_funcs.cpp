@@ -20,9 +20,13 @@
 // }
 
 void drive(float distance, bool dir) {
-    PID left_pid = PID(1.0, 0, 1.0);
-    PID right_pid = PID(1.0, 0, 1.0);
-    PID turn_pid = PID(1.0, 0, 1.0);
+	printf("RUNNING\n");
+    float kp = 0.07;
+    float ki = 0.0;
+    float kd = 0.0;
+    PID left_pid = PID(kp, ki, kd);
+    PID right_pid = PID(kp, ki, kd);
+    PID turn_pid = PID(0.5, 0.0, 0.0);
 
     left_motors.set_zero_position_all(0.0);
     right_motors.set_zero_position_all(0.0);
@@ -31,17 +35,35 @@ void drive(float distance, bool dir) {
 
     float left;
     float right;
+    float turn;
 
-    int start_time = pros::millis();
+    float imu_reading;
 
-    while (((left_motors.get_position() + right_motors.get_position())/2 - distance) > fabs(deadzone)) {
-        float delta_time = (float)(pros::millis() - start_time) / 1000.0;
-        left = left_pid.cycle(left_motors.get_position(), distance, delta_time, 10.0);
-        right = right_pid.cycle(right_motors.get_position(), distance, delta_time, 10.0);
+    int prev_time = pros::millis();
+    int cur_time;
+    printf("Left: %f, Right: %f\n", left_motors.get_position(), right_motors.get_position());
+    while (fabs(left_motors.get_position() - distance) > deadzone && fabs(right_motors.get_position() - distance) > deadzone) {
+        cur_time = pros::millis();
+        float delta_time = (float)(pros::millis() - prev_time) / 1000.0;
+        left = left_pid.cycle(distance, left_motors.get_position(), delta_time, 10.0);
+        right = right_pid.cycle(distance, right_motors.get_position(), delta_time, 10.0);
 
-        left_motors.move_velocity(left);
-        right_motors.move_velocity(right);
+        imu_reading = imu.get_heading();
+        if (imu_reading > 250) {
+            imu_reading = imu_reading - 360;
+        }
+
+        turn = turn_pid.cycle(0, imu_reading, delta_time, 10.0);
+        printf("Left: %f, Right: %f, Heading: %f, delta %f, LPID: %f, RPID: %f, turn: %f\n", left_motors.get_position(), right_motors.get_position(), imu.get_heading(), delta_time, left, right, turn);
+        pros::lcd::print(1, "Left %f", left_motors.get_position());
+        pros::lcd::print(2, "Right %f", right_motors.get_position());
+        left_motors.move_velocity(left + turn);
+        right_motors.move_velocity(right - turn);
+        prev_time = cur_time;
+        pros::delay(20);
 
     }
+	left_motors.move_velocity(0);
+	right_motors.move_velocity(0);
 
 }

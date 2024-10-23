@@ -19,8 +19,9 @@
 std::atomic<wall_state_enum> wall_state(NORMAL);
 std::atomic<sort_state_enum> sort_state(OFF);
 
+
 void color_sort() {
-	int delay = 50;
+	int delay = 40;
 	while (true) {
 		// printf("%d\n", hook_dist.get());
 		if (hook_dist.get() < 40 && wall_state == NORMAL) {
@@ -71,6 +72,7 @@ void initialize() {
 	pros::lcd::initialize();
 	wall_rot.reset_position();
 	wall_rot.set_data_rate(5);
+	imu.reset(true);
 	pros::delay(500);
 }
 /**
@@ -119,6 +121,7 @@ void autonomous() {}
  * task, not resume it from where it left off.
  */
 void opcontrol() {
+
 	// constants
 	float target;
 	float error;
@@ -160,6 +163,7 @@ void opcontrol() {
 			mogo.extend();
 		}
 		if (!(sort_state == SORTING)) {
+			sort_state = OFF;
 			if (controller.get_digital(DIGITAL_R1)) {
 				roller.move_velocity(intake_vel);
 				hooks.move_velocity(intake_vel);
@@ -169,12 +173,11 @@ void opcontrol() {
 				hooks.move_velocity(-intake_vel);
 			}
 			else if (controller.get_digital(DIGITAL_Y)) {
-				hooks.move_velocity(300);
+				hooks.move_velocity(400);
 				roller.move_velocity(600);
 				sort_state = RED;
 			}
 			else {
-				sort_state = OFF;
 				roller.move_velocity(0);
 				hooks.move_velocity(0);
 			}
@@ -275,7 +278,8 @@ void opcontrol() {
 			}
 		}
 
-		// printf("%f\n", ring_col.get_hue());
+		printf("%f\n", ring_col.get_hue());
+		printf("%d\n", hook_dist.get());
 
 		pros::lcd::print(0, "%d", wall_state.load());
 		pros::lcd::print(1, "%d", hook_dist.get());

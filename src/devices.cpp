@@ -13,5 +13,6 @@ pros::Motor hooks = pros::Motor(-6);
 pros::Rotation wall_rot = pros::Rotation(11);
 pros::Distance hook_dist = pros::Distance(18);
 pros::Optical ring_col = pros::Optical(20);
+pros::Imu imu = pros::Imu(16);
 
 pros::adi::Pneumatics mogo = pros::adi::Pneumatics('e', false);
