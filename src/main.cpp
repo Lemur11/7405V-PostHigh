@@ -2,7 +2,11 @@
 #include "devices.h"
 #include "auto_funcs.h"
 #include <atomic>
+#include <numeric>
+#include <vector>
 #include "pid.h"
+#include "pros/misc.h"
+#include "pros/motors.h"
 
 // String print_state(&state_enum s) {
 // 	switch (s) {
@@ -70,6 +74,12 @@ void color_sort() {
  */
 void initialize() {
 	pros::lcd::initialize();
+	lmotor.tare_position();
+	rmotor.tare_position();
+	lmotor.set_gearing(pros::E_MOTOR_GEAR_600);
+	rmotor.set_gearing(pros::E_MOTOR_GEAR_600);
+	lmotor.set_encoder_units(pros::E_MOTOR_ENCODER_DEGREES);
+	rmotor.set_encoder_units(pros::E_MOTOR_ENCODER_DEGREES);
 	wall_rot.reset_position();
 	wall_rot.set_data_rate(5);
 	imu.reset(true);
@@ -105,7 +115,10 @@ void competition_initialize() {}
  * will be stopped. Re-enabling the robot will restart the task, not re-start it
  * from where it left off.
  */
-void autonomous() {}
+void autonomous() {
+	drive(2000, -1.0);
+	// turn(250, true);
+}
 
 /**
  * Runs the operator control code. This function will be started in its own task
@@ -172,10 +185,10 @@ void opcontrol() {
 				roller.move_velocity(-intake_vel);		
 				hooks.move_velocity(-intake_vel);
 			}
-			else if (controller.get_digital(DIGITAL_Y)) {
+			else if (controller.get_digital(DIGITAL_B)) {
 				hooks.move_velocity(400);
 				roller.move_velocity(600);
-				sort_state = RED;
+				sort_state = BLUE;
 			}
 			else {
 				roller.move_velocity(0);
@@ -195,6 +208,9 @@ void opcontrol() {
 			}
 		}
 
+		if (controller.get_digital_new_press(DIGITAL_Y)) {
+			doinker.toggle();
+		}
 
 		// fish mech finite state machine 
 		switch(wall_state) {
@@ -281,12 +297,11 @@ void opcontrol() {
 		printf("%f\n", ring_col.get_hue());
 		printf("%d\n", hook_dist.get());
 
-		pros::lcd::print(0, "%d", wall_state.load());
-		pros::lcd::print(1, "%d", hook_dist.get());
-		pros::lcd::print(2, "Error: %f", error);
-		pros::lcd::print(3, "Prev: %f", prev_error);
-		pros::lcd::print(4, "Rot: %f", (float)wall_rot.get_angle() / 100.0);
-
+		// std::vector<double> lm = left_motors.get_position_all();
+		// std::vector<double> lr = right_motors.get_position_all();
+		pros::lcd::print(0, "Left: %f", lmotor.get_position());
+		pros::lcd::print(1, "Right: %f", rmotor.get_position());
+		pros::lcd::print(2, "Heading: %f", imu.get_heading());
 		pros::delay(20);                               // Run for 20 ms then update
 	}
 }

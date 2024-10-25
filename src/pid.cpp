@@ -51,3 +51,7 @@ void PID::reset() {
     prev_error = 0;
     prev_output = 0;
 }
+
+void PID::set_prev(float nset) {
+    prev_error = nset;
+}

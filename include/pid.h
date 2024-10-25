@@ -13,4 +13,5 @@ class PID {
         PID(float init_kP, float init_kI, float init_kD);
         float cycle(float reference, float reading, float delta_time, float max_slew, bool log=false);
         void reset();
+        void set_prev(float nset);
 };
