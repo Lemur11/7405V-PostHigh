@@ -5,6 +5,6 @@ float wall_pid_cycle(wall_state_enum state, float target, float prev_error, int 
 
 void drive(float distance, float dir);
 
-void turn(float angle, bool right);
+void turn(float angle, bool right, float turn_fact=1.0);
 
 float get_angle(float current, float desired, float right);
