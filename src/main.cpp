@@ -1,14 +1,30 @@
 #include "main.h"
 #include "devices.h"
 #include "auto_funcs.h"
-#include <atomic>
-#include <numeric>
-#include <vector>
 #include "pid.h"
-#include "pros/llemu.hpp"
-#include "pros/misc.h"
-#include "pros/motors.h"
-#include "pros/rtos.hpp"
+#include "constants.h"
+#include <atomic>
+
+
+#define wall_move(pos) \
+		prev_time = pros::millis(); \
+		while (true) { \
+			int reading = wall_rot.get_position() % 36000; \
+			if (reading > wall_cap) { \
+				reading = reading - 36000; \
+			} \
+			pros::lcd::print(1, "Reading: %d", reading); \
+			cur_time = pros::millis(); \
+			float power = wall_pid.cycle(pos, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true); \
+			wall.move_velocity(power); \
+			if ((pos - reading) < wall_deadzone) { \
+				wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD); \
+				wall.move_velocity(0); \
+				break; \
+			} \
+			prev_time = cur_time; \
+			pros::delay(20); \
+		} \
 
 // String print_state(&state_enum s) {
 // 	switch (s) {
@@ -24,6 +40,95 @@
 // state vars
 std::atomic<wall_state_enum> wall_state(NORMAL);
 std::atomic<sort_state_enum> sort_state(OFF);
+
+PID wall_pid = PID(0.015, 0, 0.0001);
+
+void wall_task() {
+	int prev_time;
+	int cur_time;
+	while (true) {
+		// fish mech finite state machine 
+		switch(wall_state) {
+			case NORMAL:
+			{
+				pros::lcd::print(6, "NORMAL");
+				// wall.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+				break;
+			}
+			case CATCH:
+			{
+				hooks.move_velocity(100);
+				roller.move_velocity(600);
+				pros::lcd::print(6, "CATCH");
+				if (hook_dist.get() < 40) {
+					hooks.move_velocity(0);
+					wall_state = STOPPED;
+				}
+				break;
+			}
+			case STOPPED:
+			{
+				pros::lcd::print(6, "STOPPED");
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > wall_cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(7700, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
+				wall.move_velocity(power);
+				if (fabs(7700 - reading) < wall_deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = ARMED;
+				}
+				prev_time = cur_time;
+				break;
+			}
+			case ARMED:
+			{
+				pros::lcd::print(6, "ARMED");
+				break;
+			}
+			case TOGGLED:
+			{
+				pros::lcd::print(6, "TOGGLED");
+				hooks.move_velocity(50);
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > wall_cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
+				wall.move_velocity(power);
+				if (fabs(20000 - reading) < wall_deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = USED;
+				}
+				prev_time = cur_time;
+				break;
+			}
+			case USED:
+			{
+				pros::lcd::print(6, "USED");
+				int reading = wall_rot.get_position() % 36000;
+    			if (reading > wall_cap) {
+        			reading = reading - 36000;
+    			}
+				cur_time = pros::millis();
+				float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
+				wall.move_velocity(power);
+				if (fabs(0 - reading) < wall_deadzone) {
+        			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+        			wall.move_velocity(0);
+					wall_state = NORMAL;
+				}				
+				prev_time = cur_time;
+				break;
+			}
+		}
+	}
+}
 
 
 void color_sort() {
@@ -75,17 +180,22 @@ void color_sort() {
  * to keep execution time for this mode under a few seconds.
  */
 void initialize() {
+	// llemu init
 	pros::lcd::initialize();
+	// reset motor encoders
 	lmotor.tare_position();
 	rmotor.tare_position();
 	lmotor.set_gearing(pros::E_MOTOR_GEAR_600);
 	rmotor.set_gearing(pros::E_MOTOR_GEAR_600);
 	lmotor.set_encoder_units(pros::E_MOTOR_ENCODER_DEGREES);
 	rmotor.set_encoder_units(pros::E_MOTOR_ENCODER_DEGREES);
+	// wall rot reset
 	wall_rot.reset_position();
 	wall_rot.set_data_rate(5);
-	mogo.extend();
+	// imu reset
 	imu.reset(true);
+	// color sort init
+	pros::Task sorting(color_sort);
 	pros::delay(500);
 }
 /**
@@ -120,165 +230,8 @@ void competition_initialize() {}
  */
 void autonomous() {
 	bool r_b = true;
-	PID wall_pid = PID(0.015, 0, 0.0001);
-	int cap = 28000;
-	float deadzone = 500;
 	int cur_time;
-	int prev_time = pros::millis();
-		
-	wall_rot.set_position(7200);
-	if (r_b) {
-		drive(170, 1.0);
-		hooks.move_velocity(-100);
-		// alliance stake
-		while (true) {
-			int reading = wall_rot.get_position() % 36000;
-			if (reading > cap) {
-				reading = reading - 36000;
-			}
-			pros::lcd::print(1, "Reading: %d", reading);
-			cur_time = pros::millis();
-			float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
-			wall.move_velocity(power);
-			if (fabs(20000 - reading) < deadzone) {
-				wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-				wall.move_velocity(0);
-				break;
-			}
-			prev_time = cur_time;
-			pros::delay(20);
-		}
-		prev_time = pros::millis();
-		while (true) {
-			int reading = wall_rot.get_position() % 36000;
-			if (reading > cap) {
-				reading = reading - 36000;
-			}
-			pros::lcd::print(1, "Reading: %d", reading);
-			cur_time = pros::millis();
-			float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
-			wall.move_velocity(power);
-			if (fabs(0 - reading) < deadzone) {
-				wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-				wall.move_velocity(0);
-				break;
-			}
-			prev_time = cur_time;
-			pros::delay(20);
-		}
-		
-		drive(200, -1.0);
-		doinker.retract();
-		turn(225, true, 0.7);
-		roller.move_velocity(600);
-		hooks.move_velocity(100);
-		drive(1000, 1.0);
-
-		while (true) {
-			if (hook_dist.get() < 60) {
-				hooks.move_velocity(0);
-				break;
-			}
-		}
-		doinker.extend();
-		pros::delay(500);
-
-		turn(9, true);
-		drive(710, -1.0);
-		mogo.retract();
-		turn(145, true);
-		roller.move_velocity(600);
-		hooks.move_velocity(200);
-		drive(1040, 1.0);
-		turn(225, true, 0.5);
-		drive(657, 1.0);
-		// wait for first
-		pros::delay(500);
-		drive(120, -1.0);
-		turn(162, true);
-		drive(120, true);
-		// wait for second ring
-		pros::delay(3000);
-		mogo.extend();
-		turn(330, true);
-		drive(1600, 1.0);
-	}
-	else {
-		drive(170, 1.0);
-		hooks.move_velocity(-100);
-		// alliance stake
-		while (true) {
-			int reading = wall_rot.get_position() % 36000;
-			if (reading > cap) {
-				reading = reading - 36000;
-			}
-			pros::lcd::print(1, "Reading: %d", reading);
-			cur_time = pros::millis();
-			float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
-			wall.move_velocity(power);
-			if (fabs(20000 - reading) < deadzone) {
-				wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-				wall.move_velocity(0);
-				break;
-			}
-			prev_time = cur_time;
-			pros::delay(20);
-		}
-		prev_time = pros::millis();
-		while (true) {
-			int reading = wall_rot.get_position() % 36000;
-			if (reading > cap) {
-				reading = reading - 36000;
-			}
-			pros::lcd::print(1, "Reading: %d", reading);
-			cur_time = pros::millis();
-			float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
-			wall.move_velocity(power);
-			if (fabs(0 - reading) < deadzone) {
-				wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-				wall.move_velocity(0);
-				break;
-			}
-			prev_time = cur_time;
-			pros::delay(20);
-		}
-		
-		drive(200, -1.0);
-		doinker.retract();
-		turn(360-242, true, 0.7);
-		roller.move_velocity(600);
-		hooks.move_velocity(100);
-		drive(1000, 1.0);
-
-		while (true) {
-			if (hook_dist.get() < 60) {
-				hooks.move_velocity(0);
-				break;
-			}
-		}
-		doinker.extend();
-		pros::delay(500);
-
-		turn(360-7, true);
-		drive(730, -1.0);
-		mogo.retract();
-		turn(360-140, true);
-		roller.move_velocity(600);
-		hooks.move_velocity(200);
-		drive(1040, 1.0);
-		turn(360-225, true, 0.5);
-		drive(657, 1.0);
-		// wait for first
-		pros::delay(500);
-		drive(120, -1.0);
-		turn(360-162, true);
-		drive(120, true);
-		// wait for second ring
-		pros::delay(3000);
-		mogo.extend();
-		turn(360-330, true);
-		drive(1600, 1.0);
-	}
+	int prev_time;
 }
 
 /**
@@ -295,19 +248,6 @@ void autonomous() {
  * task, not resume it from where it left off.
  */
 void opcontrol() {
-
-	// constants
-	float intake_vel = 400;
-	float deadzone = 500;
-	float turn_sensitivity = 0.9;
-	int cap = 28000;
-
-	// pid
-	PID wall_pid = PID(0.015, 0, 0.0001);
-
-	// color sort
-	pros::Task sorting(color_sort);
-
 	// coast brake mode
 	left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 	right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
@@ -390,13 +330,13 @@ void opcontrol() {
 			{
 				pros::lcd::print(6, "STOPPED");
 				int reading = wall_rot.get_position() % 36000;
-    			if (reading > cap) {
+    			if (reading > wall_cap) {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
 				float power = wall_pid.cycle(7700, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
-				if (fabs(7700 - reading) < deadzone) {
+				if (fabs(7700 - reading) < wall_deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
         			wall.move_velocity(0);
 					wall_state = ARMED;
@@ -414,13 +354,13 @@ void opcontrol() {
 				pros::lcd::print(6, "TOGGLED");
 				hooks.move_velocity(50);
 				int reading = wall_rot.get_position() % 36000;
-    			if (reading > cap) {
+    			if (reading > wall_cap) {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
 				float power = wall_pid.cycle(20000, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
-				if (fabs(20000 - reading) < deadzone) {
+				if (fabs(20000 - reading) < wall_deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
         			wall.move_velocity(0);
 					wall_state = USED;
@@ -432,13 +372,13 @@ void opcontrol() {
 			{
 				pros::lcd::print(6, "USED");
 				int reading = wall_rot.get_position() % 36000;
-    			if (reading > cap) {
+    			if (reading > wall_cap) {
         			reading = reading - 36000;
     			}
 				cur_time = pros::millis();
 				float power = wall_pid.cycle(0, reading, (float)(cur_time - prev_time) / 1000.0, 10000, true);
 				wall.move_velocity(power);
-				if (fabs(0 - reading) < deadzone) {
+				if (fabs(0 - reading) < wall_deadzone) {
         			wall.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
         			wall.move_velocity(0);
 					wall_state = NORMAL;

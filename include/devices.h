@@ -1,6 +1,4 @@
 #include "main.h"
-#include "pros/adi.hpp"
-#include "pros/motor_group.hpp"
 
 extern pros::Controller controller;
 
